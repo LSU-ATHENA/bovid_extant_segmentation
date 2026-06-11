@@ -14,6 +14,7 @@ class SegmentationPairDataset(Dataset):
         self.exts = {e.lower() for e in exts}
         self.preprocess_fns = preprocess_fns
 
+        print(raw_root)
         raw_paths = [p for p in raw_root.rglob("*") if p.is_file() and p.suffix.lower() in self.exts]
         bw_by_name = {p.name: p for p in bw_root.rglob("*") if p.is_file() and p.suffix.lower() in self.exts}
 
@@ -78,7 +79,7 @@ def make_train_test_loaders(
     train_ratio=0.8,
     seed=42,
     batch_size=8,
-    num_workers=0,
+    num_workers=4,
     ignore_index=255,
     size_divisor=32,
 ):

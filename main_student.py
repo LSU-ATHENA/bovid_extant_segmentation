@@ -17,6 +17,8 @@ from tqdm import tqdm
 from pathlib import Path
 import segmentation_models_pytorch as smp
 
+#import model_path as mp
+
 from dataloader import SegmentationPairDataset, make_train_test_loaders
 
 # Define dice metric
@@ -60,12 +62,22 @@ def dice_metric(logits, targets, eps = 1e-7):
     dice_c = (2.0 * num_intersections) / (mask.sum() + f_targets.sum())
     return dice_c
 
+# I hope this isnt a hacky workaround, sorry!
+class DiceBCEWithLogitsLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.loss_BCEWLL = nn.BCEWithLogitsLoss()
+        
+    def forward(self, input, targets, eps = 1e-7):
+        return self.loss_BCEWLL(input, targets) + (1.0 - dice_metric(input, targets, eps))
+
 # Training loop
 def train_epoch(model, loader, optimizer, loss_fn, device):
     model.train()
     total_loss = 0.0
 
     for i, batch in enumerate(tqdm(loader, desc = "Train")):
+        i += 1
         images = batch["x"] 
         masks = batch["y"]
 
@@ -151,7 +163,7 @@ def main():
     # TODO 9:
     # - define loss function
     #   (hint: BCEWithLogitsLoss)
-    loss_fn = torch.nn.BCEWithLogitsLoss()
+    loss_fn = DiceBCEWithLogitsLoss()
 
     # TODO 10:
     # - define optimizer (Adam or AdamW)
@@ -168,6 +180,15 @@ def main():
             f"val_dice={val_dice:.4f}"
         )
 
+    # Handle saving the model
+    """
+    decision = input("Save Model? y/n \n")
+    if decision == "y":
+        name = input("Enter model name \n")
+        mp.MODEL_NAME = name
+        
+        torch.save(model.state_dict(), mp.MODEL_PATH)
+    """
 
 if __name__ == "__main__":
     main()

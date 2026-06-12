@@ -158,7 +158,7 @@ if __name__ == "__main__":
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
-    best_test_loss = float("inf")
+    best_test_metric = float("-inf")
     save_dir = Path("saved_models")
     save_dir.mkdir(parents=True, exist_ok=True)
     arg_kv = "_".join(
@@ -180,8 +180,8 @@ if __name__ == "__main__":
 
         scheduler.step()
 
-        if test_dice_metric > best_test_loss:
-            best_test_loss = test_dice_metric
+        if test_dice_metric > best_test_metric:
+            best_test_metric = test_dice_metric
             t.save(
                 {
                     "epoch": epoch,
@@ -194,6 +194,6 @@ if __name__ == "__main__":
                 },
                 save_path,
             )
-            print(f"Saved new best checkpoint to {save_path} (test_loss={best_test_loss:.4f})")
+            print(f"Saved new best checkpoint to {save_path} (test_metric={best_test_metric:.4f})")
 
-    print(f"Training complete. Best test loss: {best_test_loss:.4f}")
+    print(f"Training complete. Best test metric: {best_test_metric:.4f}")

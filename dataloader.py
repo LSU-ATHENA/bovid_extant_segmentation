@@ -38,8 +38,8 @@ class SegmentationPairDataset(Dataset):
             #    x = preprocess_fn(x)
 
         with Image.open(y_path) as mask:
-            y = np.array(mask.convert("L"), dtype=np.int64)  # [H, W]
-            y = (y > 0).astype(np.int64)  # always enforce {0,1}
+            y = np.array(mask.convert("L"), dtype=np.uint8)
+            y = (y == 0).astype(np.float32)  # background=255 -> 0, foreground=0 -> 1
             y = torch.from_numpy(y)
             y = y.unsqueeze(0) # [H, W] -> [1, H, W]
 

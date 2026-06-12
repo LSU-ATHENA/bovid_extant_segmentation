@@ -23,7 +23,16 @@ def parse_args():
     parser.add_argument("--raw_data", type=str, default="filt_res_data/raw", help="Path to raw data")
     parser.add_argument("--mask_data", type=str, default="filt_res_data/bw", help="Path to mask data")
     parser.add_argument("--device", type=str, default="cuda" if t.cuda.is_available() else "cpu", help="Device to use")
+    parser.add_argument("--downsample_factor", type=int, default=1, help="Factor to downsample images/masks for faster training (e.g. 2 for half size)")
     return parser.parse_args()
+
+
+def pad_to_multiple(x, divisor=32):
+    _, _, h, w = x.shape
+    pad_h = (divisor - h % divisor) % divisor
+    pad_w = (divisor - w % divisor) % divisor
+
+    return t.nn.functional.pad(x, (0, pad_w, 0, pad_h))
 
 
 def dice_metric(logits, targets, eps=1e-7):
@@ -42,6 +51,11 @@ def train_epoch(model, train_loader, optimizer, bce_loss, dice_loss, device):
         images, masks = batch['x'], batch['y']
         images, masks = images.to(device), masks.to(device).float()
         
+        if args.downsample_factor > 1:
+            images = nn.functional.interpolate(images, scale_factor=1/args.downsample_factor, mode='bilinear', align_corners=False)
+            masks = nn.functional.interpolate(masks, scale_factor=1/args.downsample_factor, mode='nearest')
+            images, masks = pad_to_multiple(images, divisor=32), pad_to_multiple(masks, divisor=32)
+
         optimizer.zero_grad()
         outputs = model(images)
         bce = bce_loss(outputs, masks)

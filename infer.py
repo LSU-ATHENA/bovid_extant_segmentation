@@ -2,15 +2,13 @@ import numpy as np
 import torch as t
 import torch.nn as nn
 import segmentation_models_pytorch as smp
-from segmentation_models_pytorch.encoders import get_preprocessing_fn
 import argparse
 from pathlib import Path
 import cv2
 from tqdm import tqdm
 from main import pad_to_multiple
 import matplotlib as plot
-from preprocess import apply_contrast
-from preprocess import prepro_init
+import preprocess
 
 
 def parse_args():
@@ -58,7 +56,6 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents = True, exist_ok = True)
 
-    preprocessing_fn = get_preprocessing_fn(args.encoder_name, pretrained = "imagenet")
     model, checkpoint = load_model(args, device)
 
     image_paths = sorted(p for p in input_dir.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff"})
@@ -79,12 +76,11 @@ def main():
             h, w, c = img.shape
 
             # Preprocess
-            prepro_init(checkpoint['args'])
+            prepro_obj = preprocess.PreProObj(args = args)
+            prepro_obj.setup_stack(stack = [prepro_obj.apply_contrast])
             downsample_factor = checkpoint['args']['downsample_factor']
-            contrast = checkpoint['args']['contrast']
             
-            img = apply_contrast(contrast_type = contrast)(img)
-            img = preprocessing_fn(img)
+            img = prepro_obj.process(img)
             img = t.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
             img = img.float().to(device)
             

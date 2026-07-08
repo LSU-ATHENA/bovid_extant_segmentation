@@ -74,7 +74,7 @@ def train_epoch(model, train_loader, optimizer, bce_loss, dice_loss, device):
             bce_loss=f"{bce.item():.4f}",
             dice_loss=f"{dice.item():.4f}",
         )
-    
+        
     return total_bce_loss / len(train_loader), total_dice_loss / len(train_loader)
 
 

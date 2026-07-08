@@ -4,15 +4,16 @@ from torch.utils.data import Dataset, DataLoader
 from functools import partial
 from PIL import Image
 import torch.nn.functional as F
+from preprocess import PreProObj
 
 
 class SegmentationPairDataset(Dataset):
-    def __init__(self, raw_root, bw_root, binarize_mask=True, exts=(".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"), preprocess_fns=[]):
+    def __init__(self, raw_root, bw_root, binarize_mask = True, exts = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"), prepro_obj = None):
         self.raw_root = raw_root
         self.bw_root = bw_root
         self.binarize_mask = binarize_mask
         self.exts = {e.lower() for e in exts}
-        self.preprocess_fns = preprocess_fns
+        self.prepro_obj = prepro_obj
 
         raw_paths = [p for p in raw_root.rglob("*") if p.is_file() and p.suffix.lower() in self.exts]
         bw_by_name = {p.name: p for p in bw_root.rglob("*") if p.is_file() and p.suffix.lower() in self.exts}
@@ -23,7 +24,7 @@ class SegmentationPairDataset(Dataset):
             if bp is not None:
                 self.pairs.append((rp, bp))
 
-        self.pairs.sort(key=lambda t: t[0].name)
+        self.pairs.sort(key = lambda t: t[0].name)
 
     def __len__(self):
         return len(self.pairs)
@@ -31,11 +32,14 @@ class SegmentationPairDataset(Dataset):
     def __getitem__(self, idx):
         x_path, y_path = self.pairs[idx]
 
+        # I just changed a bunch of stuff here since it wasnt being used
         with Image.open(x_path) as img:
-            x = np.array(img.convert("RGB"), dtype=np.float32) / 255.0
+            x = np.array(img.convert("RGB"), dtype = np.uint8)
+            
+            x = self.prepro_obj.process(x)
+            x = x.astype(np.float32)
+            x /= 255.0
             x = torch.from_numpy(x).permute(2, 0, 1)  # [3, H, W]
-            #for preprocess_fn in self.preprocess_fns:
-            #    x = preprocess_fn(x)
 
         with Image.open(y_path) as mask:
             y = np.array(mask.convert("L"), dtype=np.uint8)

@@ -157,8 +157,6 @@ if __name__ == "__main__":
 
     train_loader, test_loader = make_train_test_loaders(dataset, train_ratio = args.train_ratio, seed = args.seed, batch_size = args.batch_size, num_workers = args.num_workers)
 
-    # APPARENTLY THERE IS A PREPROCESS FN PARAMETER I JUST WASTED AN HOUR OF MY LIFE HDHSHDSHDHSDHSHDHSDH
-
     if args.model_name == "UnetPlusPlus":
         # binary mask, use logits + BCE/Dice
         model = smp.UnetPlusPlus(encoder_name = args.encoder_name, encoder_weights = "imagenet", in_channels = 3, classes = 1, activation = None)

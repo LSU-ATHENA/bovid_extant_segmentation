@@ -36,7 +36,7 @@ class PreProObj:
 
     # ---------THESE FUNCTIONS EXPECT RGB-----------
     # returns histogram equalized image as numpy array in RGB colorspace
-    def apply_contrast_he(image):
+    def apply_contrast_he(self, image):
         ycrcb_image = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)
         ycrcb_image[:, :, 0] = cv2.equalizeHist(ycrcb_image[:, :, 0])
         

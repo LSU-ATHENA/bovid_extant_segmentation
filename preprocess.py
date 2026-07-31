@@ -1,6 +1,7 @@
 import numpy as np
 import torch as t
 import cv2
+from scipy import ndimage
 from PIL import Image
 from segmentation_models_pytorch.encoders import get_preprocessing_fn
 
@@ -23,7 +24,7 @@ class PreProObj:
     def process(self, image):
         for fn in self.prepro_stack:
             image = fn(image)
-        return image
+        return image.astype(np.float32)
     
     def apply_contrast(self, image):
         match self.args.contrast:
@@ -60,6 +61,23 @@ class PreProObj:
         return clahe_img
     
     def identity(self, image):
+        return image
+    
+class PostProObj:
+    def __init__(self, args):
+        self.args = args
+        
+    def setup_stack(self, stack):
+        self.post_pro_stack = stack
+        
+    def process(self, image):
+        for fn in self.post_pro_stack:
+            image = fn(image)
+        return image
+    
+    # Requires binary image with floats like 1.0 or 0.0
+    def fill_holes(self, image):
+        image = ndimage.binary_fill_holes(image)
         return image
 
 """

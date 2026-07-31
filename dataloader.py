@@ -8,12 +8,13 @@ from preprocess import PreProObj
 
 
 class SegmentationPairDataset(Dataset):
-    def __init__(self, raw_root, bw_root, binarize_mask = True, exts = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"), prepro_obj = None):
+    def __init__(self, raw_root, bw_root, binarize_mask = True, exts = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"), prepro_obj = None, args = None):
         self.raw_root = raw_root
         self.bw_root = bw_root
         self.binarize_mask = binarize_mask
         self.exts = {e.lower() for e in exts}
         self.prepro_obj = prepro_obj
+        self.args = args
 
         raw_paths = [p for p in raw_root.rglob("*") if p.is_file() and p.suffix.lower() in self.exts]
         bw_by_name = {p.name: p for p in bw_root.rglob("*") if p.is_file() and p.suffix.lower() in self.exts}
@@ -40,12 +41,18 @@ class SegmentationPairDataset(Dataset):
             x = x.astype(np.float32)
             x /= 255.0
             x = torch.from_numpy(x).permute(2, 0, 1)  # [3, H, W]
+            
+            if self.args.downsample_factor > 1:
+                x = F.interpolate(x.unsqueeze(0), scale_factor = 1 / self.args.downsample_factor, mode = 'bilinear', align_corners = False).squeeze(0)
 
         with Image.open(y_path) as mask:
             y = np.array(mask.convert("L"), dtype=np.uint8)
             y = (y == 0).astype(np.float32)  # background=255 -> 0, foreground=0 -> 1
             y = torch.from_numpy(y)
             y = y.unsqueeze(0) # [H, W] -> [1, H, W]
+            
+            if self.args.downsample_factor > 1:
+                y = F.interpolate(y.unsqueeze(0), scale_factor = 1 / self.args.downsample_factor, mode = 'nearest').squeeze(0)
 
         return {"x": x, "y": y, "name": x_path.name}
 

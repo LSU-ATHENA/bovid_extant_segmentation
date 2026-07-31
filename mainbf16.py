@@ -1,4 +1,5 @@
 import argparse
+import math
 from tqdm import tqdm
 import psutil
 
@@ -33,6 +34,7 @@ def parse_args():
     parser.add_argument("--exp_name", type = str, default = "my_exp")
     parser.add_argument("--contrast", type = str, default = "none")
     parser.add_argument("--clahe_clip", type = int, default = 5)
+    parser.add_argument("--device_ids", nargs = '+', type = int, help = 'GPUs to use')
     
     return parser.parse_args()
 
@@ -61,11 +63,6 @@ def train_epoch(model, train_loader, optimizer, bce_loss, dice_loss, device, dic
     for batch in pbar:
         images, masks = batch['x'], batch['y']
         images, masks = images.to(device), masks.to(device).float()
-       
-        if args.downsample_factor > 1:
-            images = nn.functional.interpolate(images, scale_factor = 1 / args.downsample_factor, mode = 'bilinear', align_corners = False)
-            masks = nn.functional.interpolate(masks, scale_factor = 1 / args.downsample_factor, mode = 'nearest')
-            images, masks = pad_to_multiple(images, divisor = 32), pad_to_multiple(masks, divisor = 32)
 
         optimizer.zero_grad()
        
@@ -74,6 +71,11 @@ def train_epoch(model, train_loader, optimizer, bce_loss, dice_loss, device, dic
             bce = bce_loss(outputs, masks)
             dice = dice_loss(outputs, masks)
             loss = bce + dice_scalar * dice
+                
+            if t.isnan(bce).item():
+                print("NaN BCE Loss Warning! \n")
+            if t.isnan(dice).item():
+                print("NaN Dice loss Warning \n")
        
         loss.backward()
         # gradient clipping to prevent exploding gradients.
@@ -93,7 +95,7 @@ def train_epoch(model, train_loader, optimizer, bce_loss, dice_loss, device, dic
 
 def eval_epoch(model, test_loader, bce_loss, dice_loss, device):
     model.eval()
-   
+
     total_bce_loss = 0.0
     total_dice_loss = 0.0
     total_dice_metric = 0.0
@@ -104,11 +106,6 @@ def eval_epoch(model, test_loader, bce_loss, dice_loss, device):
         for batch in pbar:
             images, masks = batch['x'], batch['y']    
             images, masks = images.to(device), masks.to(device).float()
-            
-            if args.downsample_factor > 1:
-                images = nn.functional.interpolate(images, scale_factor = 1 / args.downsample_factor, mode = 'bilinear', align_corners = False)
-                masks = nn.functional.interpolate(masks, scale_factor = 1 / args.downsample_factor, mode = 'nearest')
-                images, masks = pad_to_multiple(images, divisor = 32), pad_to_multiple(masks, divisor = 32)
            
             with t.autocast(dtype = t.bfloat16, device_type = device.type):
                 outputs = model(images)
@@ -152,7 +149,7 @@ if __name__ == "__main__":
     
     prepro_obj = preprocess.PreProObj(args = args)
     prepro_obj.setup_stack(stack = [prepro_obj.apply_contrast])
-    dataset = SegmentationPairDataset(raw_root, bw_root, binarize_mask = True, prepro_obj = prepro_obj)
+    dataset = SegmentationPairDataset(raw_root, bw_root, binarize_mask = True, prepro_obj = prepro_obj, args = args)
     print(f"Total pairs found: {len(dataset)}")
 
     train_loader, test_loader = make_train_test_loaders(dataset, train_ratio = args.train_ratio, seed = args.seed, batch_size = args.batch_size, num_workers = args.num_workers)
@@ -177,6 +174,8 @@ if __name__ == "__main__":
     save_dir = Path("saved_models")
     save_dir.mkdir(parents = True, exist_ok = True)
     save_path = save_dir / f"{args.exp_name}.pt"
+    
+    model = nn.DataParallel(model, args.device_ids)
 
     print(f"Using device: {device}")
     for epoch in range(1, args.epochs + 1):

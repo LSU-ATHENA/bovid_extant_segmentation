@@ -3,6 +3,7 @@ import torch as t
 import torch.nn as nn
 import segmentation_models_pytorch as smp
 import argparse
+from argparse import Namespace
 from pathlib import Path
 import cv2
 from tqdm import tqdm
@@ -12,7 +13,7 @@ import preprocess
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Inference for tooth segmentation")
+    parser = argparse.ArgumentParser(description = "Inference for tooth segmentation")
     parser.add_argument("--checkpoint", type = str, required = True, help = "Path to trained model checkpoint (.pt)")
     parser.add_argument("--input_dir", type = str, required = True, help = "Directory with input images")
     parser.add_argument("--output_dir", type = str, required = True , help = "Directory to save predicted masks")
@@ -21,7 +22,6 @@ def parse_args():
     parser.add_argument("--device", type = str, default = "cuda" if t.cuda.is_available() else "cpu")
     parser.add_argument("--threshold", type = float, default = 0.5, help = "Sigmoid threshold for binary mask")
     parser.add_argument("--use_heatmap", type = int, default = 0)
-    parser.add_argument("--contrast", type = str, default = 'none')
     return parser.parse_args()
 
 def load_model(args, device):
@@ -34,7 +34,12 @@ def load_model(args, device):
         raise ValueError(f"Unsupported model: {args.model_name}")
 
     checkpoint = t.load(args.checkpoint, map_location = device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    state_dict = checkpoint["model_state_dict"]
+    
+    if any(k.startswith("module.") for k in state_dict.keys()):
+        state_dict = { k.replace("module.", "", 1): v for k, v in state_dict.items() }
+    
+    model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
     return model, checkpoint
@@ -76,7 +81,7 @@ def main():
             h, w, c = img.shape
 
             # Preprocess
-            prepro_obj = preprocess.PreProObj(args = args)
+            prepro_obj = preprocess.PreProObj(args = Namespace(**checkpoint['args']))
             prepro_obj.setup_stack(stack = [prepro_obj.apply_contrast])
             downsample_factor = checkpoint['args']['downsample_factor']
             
@@ -88,6 +93,8 @@ def main():
                 img = nn.functional.interpolate(img, scale_factor = 1 / downsample_factor, mode = 'bilinear', align_corners = False)
             
             img = pad_to_multiple(img, divisor = 32)
+            
+            post_pro_obj = preprocess.PostProObj(args = checkpoint['args'])
             
             # Forward
             logits = model(img)
@@ -106,6 +113,7 @@ def main():
             else:
                 mask = (probs > args.threshold).float()
                 mask = mask.squeeze().cpu().numpy()
+                mask = post_pro_obj.fill_holes(mask)
                 mask = (mask * 255).astype(np.uint8)
 
             out_path = output_dir / f"{img_path.stem}_mask.png"

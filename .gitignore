@@ -133,6 +133,12 @@ ipython_config.py
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/
 
+#pictures there are legit gigabytes of them on here
+*.png 
+*.jpg
+*.jpeg
+*.webp
+
 # Celery stuff
 celerybeat-schedule*
 celerybeat.pid

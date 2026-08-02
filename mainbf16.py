@@ -1,5 +1,7 @@
 import argparse
 import math
+import csv
+from collections import defaultdict
 from tqdm import tqdm
 import psutil
 
@@ -35,8 +37,31 @@ def parse_args():
     parser.add_argument("--contrast", type = str, default = "none")
     parser.add_argument("--clahe_clip", type = int, default = 5)
     parser.add_argument("--device_ids", nargs = '+', type = int, help = 'GPUs to use')
+    parser.add_argument("--stratify", action="store_true", help="Whether to stratify the train/test split based on taxonomy")
+    parser.add_argument("--taxonomy_csv", type = str, default = "bovid_taxonomy.csv", help = "Path to taxonomy CSV used for stratification and per-class metrics")
+
     
     return parser.parse_args()
+
+
+def load_filename_to_class(taxonomy_csv_path):
+    taxonomy_path = Path(taxonomy_csv_path)
+    if not taxonomy_path.exists():
+        raise FileNotFoundError(f"Taxonomy CSV not found: {taxonomy_path}")
+
+    mapping = {}
+    with taxonomy_path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        for row in reader:
+            if len(row) < 2:
+                continue
+            filename = row[0].strip()
+            class_name = row[1].strip()
+            if filename:
+                mapping[filename.lower()] = class_name
+
+    return mapping
 
 
 def pad_to_multiple(x, divisor = 32):
@@ -93,18 +118,21 @@ def train_epoch(model, train_loader, optimizer, bce_loss, dice_loss, device, dic
     return total_bce_loss / len(train_loader), total_dice_loss / len(train_loader)
 
 
-def eval_epoch(model, test_loader, bce_loss, dice_loss, device):
+def eval_epoch(model, test_loader, bce_loss, dice_loss, device, class_by_filename = None):
     model.eval()
 
     total_bce_loss = 0.0
     total_dice_loss = 0.0
     total_dice_metric = 0.0
+    class_stats = defaultdict(lambda: {"intersection": 0.0, "pred_sum": 0.0, "target_sum": 0.0, "union": 0.0})
+    eps = 1e-7
    
+    i = 0
     with t.no_grad():
         pbar = tqdm(test_loader, desc = "Eval", leave = False)
        
         for batch in pbar:
-            images, masks = batch['x'], batch['y']    
+            images, masks, names = batch['x'], batch['y'], batch['name']
             images, masks = images.to(device), masks.to(device).float()
            
             with t.autocast(dtype = t.bfloat16, device_type = device.type):
@@ -112,6 +140,25 @@ def eval_epoch(model, test_loader, bce_loss, dice_loss, device):
                 bce = bce_loss(outputs, masks)
                 dice = dice_loss(outputs, masks)
                 dice_m = dice_metric(outputs, masks)
+
+            if class_by_filename is not None:
+                preds = (t.sigmoid(outputs) > 0.5).float()
+                for i, sample_name in enumerate(names):
+                    class_name = class_by_filename.get(sample_name.lower())
+                    if class_name is None:
+                        raise ValueError(f"Missing taxonomy class for filename: {sample_name}")
+
+                    pred_i = preds[i]
+                    target_i = masks[i]
+                    intersection = (pred_i * target_i).sum().item()
+                    pred_sum = pred_i.sum().item()
+                    target_sum = target_i.sum().item()
+                    union = pred_sum + target_sum - intersection
+
+                    class_stats[class_name]["intersection"] += intersection
+                    class_stats[class_name]["pred_sum"] += pred_sum
+                    class_stats[class_name]["target_sum"] += target_sum
+                    class_stats[class_name]["union"] += union
            
             total_bce_loss += bce.item()
             total_dice_loss += dice.item()
@@ -122,8 +169,21 @@ def eval_epoch(model, test_loader, bce_loss, dice_loss, device):
                 dice_loss=f"{dice.item():.4f}",
                 dice_metric=f"{dice_m.item():.4f}",
             )
-   
-    return total_bce_loss / len(test_loader), total_dice_loss / len(test_loader), total_dice_metric / len(test_loader)
+
+    per_class_metrics = None
+    if class_by_filename is not None:
+        per_class_metrics = {}
+        for class_name, stats in class_stats.items():
+            iou = (stats["intersection"] + eps) / (stats["union"] + eps)
+            dice = (2.0 * stats["intersection"] + eps) / (stats["pred_sum"] + stats["target_sum"] + eps)
+            per_class_metrics[class_name] = {"miou": iou, "dice": dice}
+
+    return (
+        total_bce_loss / len(test_loader),
+        total_dice_loss / len(test_loader),
+        total_dice_metric / len(test_loader),
+        per_class_metrics,
+    )
 
 
 if __name__ == "__main__":
@@ -152,7 +212,17 @@ if __name__ == "__main__":
     dataset = SegmentationPairDataset(raw_root, bw_root, binarize_mask = True, prepro_obj = prepro_obj, args = args)
     print(f"Total pairs found: {len(dataset)}")
 
-    train_loader, test_loader = make_train_test_loaders(dataset, train_ratio = args.train_ratio, seed = args.seed, batch_size = args.batch_size, num_workers = args.num_workers)
+    train_loader, test_loader = make_train_test_loaders(
+        dataset,
+        train_ratio = args.train_ratio,
+        seed = args.seed,
+        batch_size = args.batch_size,
+        num_workers = args.num_workers,
+        stratify = args.stratify,
+        taxonomy_csv_path = args.taxonomy_csv,
+    )
+
+    class_by_filename = load_filename_to_class(args.taxonomy_csv) if args.stratify else None
 
     if args.model_name == "UnetPlusPlus":
         # binary mask, use logits + BCE/Dice
@@ -180,7 +250,14 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
     for epoch in range(1, args.epochs + 1):
         train_bce_loss, train_dice_loss = train_epoch(model, train_loader, optimizer, bce_loss, dice_loss, device, args.dice_scalar)
-        test_bce_loss, test_dice_loss, test_dice_metric = eval_epoch(model, test_loader, bce_loss, dice_loss, device)
+        test_bce_loss, test_dice_loss, test_dice_metric, per_class_metrics = eval_epoch(
+            model,
+            test_loader,
+            bce_loss,
+            dice_loss,
+            device,
+            class_by_filename = class_by_filename,
+        )
 
         print(
             f"Epoch [{epoch:03d}/{args.epochs:03d}] "
@@ -188,6 +265,14 @@ if __name__ == "__main__":
             f"test_bce_loss={test_bce_loss:.4f} test_dice_loss={test_dice_loss:.4f} test_dice_metric={test_dice_metric:.4f}"
             f"free memory is {psutil.virtual_memory().available / (1024 ** 3)}"
         )
+
+        if per_class_metrics is not None:
+            mean_class_iou = sum(m["miou"] for m in per_class_metrics.values()) / len(per_class_metrics)
+            mean_class_dice = sum(m["dice"] for m in per_class_metrics.values()) / len(per_class_metrics)
+            print(f"  Stratified class means: mIoU={mean_class_iou:.4f} Dice={mean_class_dice:.4f}")
+            for class_name in sorted(per_class_metrics):
+                metrics = per_class_metrics[class_name]
+                print(f"    {class_name}: mIoU={metrics['miou']:.4f} Dice={metrics['dice']:.4f}")
 
         scheduler.step()
 

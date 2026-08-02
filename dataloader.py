@@ -4,6 +4,8 @@ from torch.utils.data import Dataset, DataLoader
 from functools import partial
 from PIL import Image
 import torch.nn.functional as F
+import csv
+from pathlib import Path
 from preprocess import PreProObj
 
 
@@ -84,6 +86,105 @@ def pad_collate_fn(batch, ignore_index=255, size_divisor=None):
     }
 
 
+def _load_filename_to_class(taxonomy_csv_path):
+    taxonomy_csv_path = Path(taxonomy_csv_path)
+    if not taxonomy_csv_path.exists():
+        raise FileNotFoundError(f"Taxonomy CSV not found: {taxonomy_csv_path}")
+
+    filename_to_class = {}
+    conflicting = []
+
+    with taxonomy_csv_path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+
+        for row in reader:
+            if len(row) < 2:
+                continue
+
+            filename = row[0].strip()
+            class_name = row[1].strip()
+            if not filename:
+                continue
+
+            key = filename.lower()
+            prev = filename_to_class.get(key)
+            if prev is None:
+                filename_to_class[key] = class_name
+            elif prev != class_name:
+                conflicting.append((filename, prev, class_name))
+
+    if conflicting:
+        ex = conflicting[0]
+        raise ValueError(
+            "Conflicting class assignments in taxonomy CSV for filename "
+            f"'{ex[0]}': '{ex[1]}' vs '{ex[2]}'."
+        )
+
+    return filename_to_class
+
+
+def _stratified_split_indices(seg_dataset, train_ratio, seed, taxonomy_csv_path):
+    filename_to_class = _load_filename_to_class(taxonomy_csv_path)
+
+    class_to_indices = {}
+    missing = []
+
+    for idx, (x_path, _) in enumerate(seg_dataset.pairs):
+        class_name = filename_to_class.get(x_path.name.lower())
+        if class_name is None:
+            missing.append(x_path.name)
+            continue
+        class_to_indices.setdefault(class_name, []).append(idx)
+
+    if missing:
+        preview = ", ".join(missing[:5])
+        suffix = "" if len(missing) <= 5 else ", ..."
+        raise ValueError(
+            f"{len(missing)} dataset file(s) are missing from taxonomy CSV. "
+            f"Examples: {preview}{suffix}"
+        )
+
+    n_total = len(seg_dataset)
+    n_train_target = int(n_total * train_ratio)
+
+    rng = np.random.default_rng(seed)
+    shuffled_per_class = {}
+    train_counts = {}
+    fractional_parts = []
+
+    for class_name, indices in class_to_indices.items():
+        shuffled = list(rng.permutation(indices))
+        shuffled_per_class[class_name] = shuffled
+
+        exact = len(indices) * train_ratio
+        base = int(np.floor(exact))
+        train_counts[class_name] = base
+        fractional_parts.append((exact - base, class_name))
+
+    remaining = n_train_target - sum(train_counts.values())
+    if remaining > 0:
+        fractional_parts.sort(key=lambda t: t[0], reverse=True)
+        for _, class_name in fractional_parts:
+            if remaining <= 0:
+                break
+            if train_counts[class_name] < len(shuffled_per_class[class_name]):
+                train_counts[class_name] += 1
+                remaining -= 1
+
+    train_indices = []
+    test_indices = []
+    for class_name, shuffled in shuffled_per_class.items():
+        n_train_class = train_counts[class_name]
+        train_indices.extend(shuffled[:n_train_class])
+        test_indices.extend(shuffled[n_train_class:])
+
+    rng.shuffle(train_indices)
+    rng.shuffle(test_indices)
+
+    return train_indices, test_indices
+
+
 def make_train_test_loaders(
     seg_dataset,
     train_ratio=0.8,
@@ -92,6 +193,8 @@ def make_train_test_loaders(
     num_workers=0,
     ignore_index=255,
     size_divisor=32,
+    stratify=False,
+    taxonomy_csv_path="bovid_taxonomy.csv",
 ):
     if not (0.0 < train_ratio < 1.0):
         raise ValueError("train_ratio must be between 0 and 1 (exclusive).")
@@ -100,10 +203,20 @@ def make_train_test_loaders(
     n_train = int(n_total * train_ratio)
     n_test = n_total - n_train
 
-    split_gen = torch.Generator().manual_seed(seed)
-    train_dataset, test_dataset = torch.utils.data.random_split(
-        seg_dataset, [n_train, n_test], generator=split_gen
-    )
+    if stratify:
+        train_indices, test_indices = _stratified_split_indices(
+            seg_dataset=seg_dataset,
+            train_ratio=train_ratio,
+            seed=seed,
+            taxonomy_csv_path=taxonomy_csv_path,
+        )
+        train_dataset = torch.utils.data.Subset(seg_dataset, train_indices)
+        test_dataset = torch.utils.data.Subset(seg_dataset, test_indices)
+    else:
+        split_gen = torch.Generator().manual_seed(seed)
+        train_dataset, test_dataset = torch.utils.data.random_split(
+            seg_dataset, [n_train, n_test], generator=split_gen
+        )
 
     collate = partial(pad_collate_fn, ignore_index=ignore_index, size_divisor=size_divisor)
 

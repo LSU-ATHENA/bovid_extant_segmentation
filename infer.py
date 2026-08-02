@@ -22,6 +22,7 @@ def parse_args():
     parser.add_argument("--device", type = str, default = "cuda" if t.cuda.is_available() else "cpu")
     parser.add_argument("--threshold", type = float, default = 0.5, help = "Sigmoid threshold for binary mask")
     parser.add_argument("--use_heatmap", type = int, default = 0)
+
     return parser.parse_args()
 
 def load_model(args, device):

@@ -93,14 +93,15 @@ def train_epoch(model, train_loader, optimizer, bce_loss, dice_loss, device, dic
        
         with t.autocast(dtype = t.bfloat16, device_type = device.type):
             outputs = model(images)
-            bce = bce_loss(outputs, masks)
-            dice = dice_loss(outputs, masks)
-            loss = bce + dice_scalar * dice
                 
-            if t.isnan(bce).item():
-                print("NaN BCE Loss Warning! \n")
-            if t.isnan(dice).item():
-                print("NaN Dice loss Warning \n")
+        bce = bce_loss(outputs.float(), masks.float())
+        dice = dice_loss(outputs.float(), masks.float())
+        loss = bce + dice_scalar * dice
+        
+        if t.isnan(bce).item():
+            print("NaN BCE Loss Warning! \n")
+        if t.isnan(dice).item():
+            print("NaN Dice loss Warning \n")
        
         loss.backward()
         # gradient clipping to prevent exploding gradients.
@@ -137,10 +138,11 @@ def eval_epoch(model, test_loader, bce_loss, dice_loss, device, class_by_filenam
            
             with t.autocast(dtype = t.bfloat16, device_type = device.type):
                 outputs = model(images)
-                bce = bce_loss(outputs, masks)
-                dice = dice_loss(outputs, masks)
-                dice_m = dice_metric(outputs, masks)
 
+            bce = bce_loss(outputs.float(), masks.float())
+            dice = dice_loss(outputs.float(), masks.float())
+            dice_m = dice_metric(outputs.float(), masks.float())
+            
             if class_by_filename is not None:
                 preds = (t.sigmoid(outputs) > 0.5).float()
                 for i, sample_name in enumerate(names):
@@ -160,9 +162,9 @@ def eval_epoch(model, test_loader, bce_loss, dice_loss, device, class_by_filenam
                     class_stats[class_name]["target_sum"] += target_sum
                     class_stats[class_name]["union"] += union
            
-            total_bce_loss += bce.item()
-            total_dice_loss += dice.item()
-            total_dice_metric += dice_m.item()
+            total_bce_loss = total_bce_loss + bce.item()
+            total_dice_loss = total_dice_loss + dice.item()
+            total_dice_metric = total_dice_metric + dice_m.item()
            
             pbar.set_postfix(
                 bce_loss=f"{bce.item():.4f}",
@@ -201,6 +203,9 @@ if __name__ == "__main__":
         device = t.device("cpu")
     else:
         device = t.device(args.device)
+        
+    if args.device_ids and device.type == "cuda":
+        device = t.device(f"cuda:{args.device_ids[0]}")
 
     t.manual_seed(args.seed)
    

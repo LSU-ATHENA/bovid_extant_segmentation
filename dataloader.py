@@ -234,6 +234,7 @@ def make_train_test_loaders(
         shuffle=False,
         num_workers=num_workers,
         collate_fn=collate,
+        drop_last = True
     )
 
     return train_loader, test_loader

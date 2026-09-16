@@ -37,10 +37,9 @@ def parse_args():
     parser.add_argument("--contrast", type = str, default = "none")
     parser.add_argument("--clahe_clip", type = int, default = 5)
     parser.add_argument("--device_ids", nargs = '+', type = int, help = 'GPUs to use')
-    parser.add_argument("--stratify", action="store_true", help="Whether to stratify the train/test split based on taxonomy")
+    parser.add_argument("--stratify", action = "store_true", help = "Whether to stratify the train/test split based on taxonomy")
     parser.add_argument("--taxonomy_csv", type = str, default = "bovid_taxonomy.csv", help = "Path to taxonomy CSV used for stratification and per-class metrics")
 
-    
     return parser.parse_args()
 
 

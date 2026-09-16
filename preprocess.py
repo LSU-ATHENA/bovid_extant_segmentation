@@ -27,6 +27,9 @@ class PreProObj:
         return image.astype(np.float32)
     
     def apply_contrast(self, image):
+        if not hasattr(self.args, 'contrast'):
+            return self.identity(image)
+            
         match self.args.contrast:
             case 'he':
                 return self.apply_contrast_he(image)

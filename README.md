@@ -42,8 +42,6 @@ python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA build
 
 If CUDA is unavailable, check with the lab before replacing packages. Use user-managed environments; do not use `sudo` or system-wide installs on the shared machine.
 
-**TODO:** Verify that a fresh environment created from the pinned export works on the current machine.
-
 ## Data
 
 | Path | Contents / use |
@@ -62,8 +60,6 @@ The segmentation loader searches recursively and pairs photographs with masks by
 
 The taxonomy classes represent seven tribes: Alcelaphini, Antilopini, Bovini, Hippotragini, Neotragini, Reduncini, and Tragelaphini. CSV labels include a suffix such as `Neotragini raw`; scripts use these strings as written. Classification matches labels by filename without regard to case and skips images missing from the CSV. Stratified segmentation requires a CSV label for every paired image. The CSV `path` column is not used to locate images by either training script.
 
-**TODO:** Document how a new student obtains access to the shared dataset and recreates the symlink on another checkout. The training scripts expect the aligned data to be prepared already.
-
 ## Segmentation training: `mainbf16.py`
 
 Training uses bfloat16 mixed precision, AdamW, cosine learning-rate scheduling, and the loss `BCE + dice_scalar * Dice`. The default train/test split is 80/20. The best checkpoint, selected by test Dice, is saved to `saved_models/<exp_name>.pt` and includes model weights, optimizer state, metrics, and training arguments.
@@ -72,7 +68,7 @@ These are long runs. Check resources and start a tmux session as described below
 
 ### U-Net++ with MobileNetV2
 
-This uses Evan's learning rate, Dice weight, epoch count, and downsampling, with batch size 8 as recorded in his later commands. The model and experiment name are explicit so the checkpoint and log names agree.
+This uses the previous student's learning rate, Dice weight, epoch count, and downsampling, with batch size 8 as recorded in his later commands. The model and experiment name are explicit so the checkpoint and log names agree.
 
 ```bash
 python -u mainbf16.py \
@@ -89,7 +85,7 @@ python -u mainbf16.py \
 
 ### SegFormer with MiT-B3 and CLAHE
 
-This follows Evan's recorded CLAHE clip-limit 10 run with batch size 5.
+This follows the previous student's recorded CLAHE clip-limit 10 run with batch size 5.
 
 ```bash
 python -u mainbf16.py \
@@ -199,7 +195,7 @@ It reads the corresponding `.txt` files and saves graphs under `model_plots/<exp
 
 The current script performs **image-level tribe classification**, using `ClassificationDataset` from `dataloader_class.py` and the CSV `class` column. It trains a pretrained `timm` backbone with cross-entropy loss and bfloat16 on CUDA/CPU. It reports accuracy, balanced accuracy, macro precision, macro recall, and macro F1. Its `--stratify` flag stratifies the classification split by tribe. For stratified per-tribe **segmentation**, use `mainbf16.py --stratify` instead.
 
-An example using the script's default ResNet18 backbone and workflow settings similar to Evan's segmentation runs:
+An example using the script's default ResNet18 backbone and workflow settings similar to the previous student's segmentation runs:
 
 ```bash
 python -u mainbf16_class.py \
@@ -217,7 +213,7 @@ python -u mainbf16_class.py \
   > resnet18_classification.txt 2>&1
 ```
 
-This is a proposed classification command, not a recorded classification run from Evan. `--model_name` is a `timm` classifier name (default `resnet18`), rather than the segmentation architecture name. The script has no `--encoder_name`, `--mask_data`, or `--dice_scalar` CLI options. It also accepts `--decay`, `--train_ratio`, `--num_workers`, `--device`, and `--device_ids`; their defaults match the segmentation script. `--stratify` is off unless supplied.
+This is a proposed classification command, not a recorded classification run from the previous student. `--model_name` is a `timm` classifier name (default `resnet18`), rather than the segmentation architecture name. The script has no `--encoder_name`, `--mask_data`, or `--dice_scalar` CLI options. It also accepts `--decay`, `--train_ratio`, `--num_workers`, `--device`, and `--device_ids`; their defaults match the segmentation script. `--stratify` is off unless supplied.
 
 The best epoch is selected by test macro F1. Training writes the following outputs:
 
